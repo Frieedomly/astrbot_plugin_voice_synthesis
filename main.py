@@ -1,49 +1,38 @@
-# main.py - AstrBot语音合成插件 v4
+# main.py - AstrBot语音合成插件
 import numpy as np
 import wave
 from pathlib import Path
 from typing import Optional
 
-# v4 API 正确导入方式
-try:
-    # 方式1：标准v4导入
-    from astrbot.api import create_plugin
-    from astrbot.api import logger
-    from astrbot.api.event import AstrMessageEvent
-    from astrbot.api.message_components import Plain, Record
-    register = create_plugin
-except ImportError:
-    try:
-        # 方式2：备用导入
-        from astrbot.api import BotRegister
-        register = BotRegister
-        from astrbot.api import logger
-        from astrbot.api.event import AstrMessageEvent
-        from astrbot.api.message_components import Plain, Record
-    except ImportError:
-        # 方式3：调试导入
-        def register(*args, **kwargs):
-            def decorator(cls):
-                return cls
-            return decorator
-        logger = print
-        class AstrMessageEvent:
-            pass
-        class Plain:
-            pass
-        class Record:
-            pass
+# 正确的导入方式 - 根据 star_manager.py 中的实际机制
+from astrbot.api import logger
+from astrbot.api_event import AstrMessageEvent
+from astrbot.api_message_components import Plain, Record
 
-@register(
-    name="语音合成",
-    description="让截图人说话（纯机械合成音）",
-    version="1.0.0"
-)
-class VoiceSynthesisPlugin:
-    """语音合成插件主类"""
+# 从 api_star 导入必要的类
+try:
+    from astrbot.api_star import Star, register, Context
+except ImportError:
+    # 如果 api_star 不可用，使用备用方案
+    class Star:
+        pass
+    class Context:
+        pass
+    def register(*args, **kwargs):
+        def decorator(cls):
+            return cls
+        return decorator
+
+
+@register("voice_synthesis", "截图人", "让截图人说话（纯机械合成音）", "1.0.0", "")
+class Main(Star):
+    """
+    主插件类
+    """
     
-    def __init__(self, bot):
-        self.bot = bot
+    def __init__(self, context: Context, config):
+        super().__init__(context)
+        self.config = config
         
         # 音频采样率
         self.sample_rate = 22050
@@ -189,27 +178,36 @@ class VoiceSynthesisPlugin:
         
         return file_path
 
-    @register.command(
-        name="speak",
-        description="让截图人说话",
-        usage="/speak <文本>"
-    )
-    async def speak_command(self, event: AstrMessageEvent, text: str):
-        """speak命令"""
-        if not text.strip():
+    @register.command("speak", "让截图人说话")
+    async def speak_command(self, event: AstrMessageEvent):
+        """speak命令处理器"""
+        # 获取消息文本内容
+        text_content = event.message.message_str.strip()
+        
+        # 移除命令部分，只保留内容
+        if text_content.startswith('/speak'):
+            text_content = text_content[6:].strip()
+        elif text_content.startswith('speak'):
+            text_content = text_content[5:].strip()
+        
+        if not text_content:
             yield Plain("ldm让我说啥（）")
             return
         
         try:
-            audio_waveform = self._text_to_audio(text)
+            # 1. 文本转音频
+            audio_waveform = self._text_to_audio(text_content)
             if audio_waveform is None:
                 yield Plain("这些字我还不会说（）")
                 return
             
-            wav_filename = f"voice_{hash(text)}.wav"
+            # 2. 保存为WAV文件
+            wav_filename = f"voice_{hash(text_content)}.wav"
             wav_file_path = self._save_as_wav(audio_waveform, wav_filename)
             
             logger.info(f"生成语音文件: {wav_file_path}")
+            
+            # 3. 发送语音消息
             yield Record(str(wav_file_path))
             
         except Exception as error:
