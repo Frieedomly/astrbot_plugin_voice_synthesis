@@ -1,62 +1,45 @@
-# main.py - 调试版本
+# main.py - AstrBot语音合成插件
 import numpy as np
 import wave
 from pathlib import Path
 from typing import Optional
 
-# 调试：打印所有可用的模块
-import astrbot
-print("可用的 astrbot 子模块:", [name for name in dir(astrbot) if not name.startswith('_')])
+# 使用实际可用的导入
+from astrbot.api import logger
 
-try:
-    from astrbot.api_event import AstrMessageEvent
-    print("成功导入 AstrMessageEvent")
-except ImportError as e:
-    print(f"导入 AstrMessageEvent 失败: {e}")
-
-try:
-    from astrbot.api_star import Context, Star, register
-    print("成功导入 api_star")
-except ImportError as e:
-    print(f"导入 api_star 失败: {e}")
-
-try:
-    from astrbot.api import logger
-    print("成功导入 logger")
-except ImportError as e:
-    print(f"导入 logger 失败: {e}")
-
-try:
-    from astrbot.api_message_components import Plain, Record
-    print("成功导入 message_components")
-except ImportError as e:
-    print(f"导入 message_components 失败: {e}")
-
-# 创建备用类以防导入失败
+# 备用类定义
 class AstrMessageEvent:
-    pass
+    def __init__(self):
+        self.message = type('Message', (), {'message_str': ''})()
 
-class Star:
-    pass
+class Plain:
+    def __init__(self, text):
+        self.text = text
 
-class Context:
-    pass
+class Record:
+    def __init__(self, file_path):
+        self.file_path = file_path
 
-def register(*args, **kwargs):
+# 简单的注册装饰器
+def register(name, author, description, version, other):
     def decorator(cls):
+        cls.plugin_info = {
+            'name': name,
+            'author': author,
+            'description': description,
+            'version': version
+        }
         return cls
     return decorator
 
-# 其余代码保持不变...
-
 @register("voice_synthesis", "截图人", "让截图人说话（纯机械合成音）", "1.0.0", "")
-class Main(Star):
+class Main:
     """
     主插件类
     """
     
-    def __init__(self, context: Context, config):
-        super().__init__(context)
+    def __init__(self, context, config=None):
+        self.context = context
         self.config = config
         
         # 音频采样率
@@ -127,6 +110,10 @@ class Main(Star):
             '嘿': ['e', 'i'],
             '呼': ['u'],
             '呵': ['o'],
+            '呀': ['a'],
+            '哟': ['o'],
+            '哇': ['a'],
+            '喂': ['e', 'i'],
         }
         
         # 插件数据目录
@@ -134,7 +121,37 @@ class Main(Star):
         self.data_dir.mkdir(parents=True, exist_ok=True)
         
         logger.info("截图人语音合成插件初始化完成")
-    
+
+    def get_command_map(self):
+        """返回命令映射 - 这是AstrBot的标准命令注册方式"""
+        return {
+            "speak": {
+                "func": self.speak_command,
+                "description": "让截图人说话（纯机械合成音）",
+                "usage": "/speak <文本>"
+            }
+        }
+
+    def get_llm_tools(self):
+        """返回LLM可用的函数工具"""
+        return [
+            {
+                "name": "speak_text",
+                "description": "让截图人说出指定的文本内容",
+                "function": self.llm_speak_tool,
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "text": {
+                            "type": "string",
+                            "description": "要说的文本内容"
+                        }
+                    },
+                    "required": ["text"]
+                }
+            }
+        ]
+
     def _synthesize_vowel(self, vowel: str, duration: Optional[float] = None) -> np.ndarray:
         """合成单个元音"""
         if vowel not in self.vowels:
@@ -203,38 +220,85 @@ class Main(Star):
         
         return file_path
 
-    @register.command("speak", "让截图人说话")
-    async def speak_command(self, event: AstrMessageEvent):
-        """speak命令处理器"""
-        # 获取消息文本内容
-        text_content = event.message.message_str.strip()
-        
-        # 移除命令部分，只保留内容
-        if text_content.startswith('/speak'):
-            text_content = text_content[6:].strip()
-        elif text_content.startswith('speak'):
-            text_content = text_content[5:].strip()
-        
-        if not text_content:
-            yield Plain("ldm让我说啥（）")
-            return
-        
+    async def speak_command(self, event):
+        """
+        speak命令处理器
+        使用方式: /speak 你好
+        """
         try:
-            # 1. 文本转音频
-            audio_waveform = self._text_to_audio(text_content)
-            if audio_waveform is None:
-                yield Plain("这些字我还不会说（）")
-                return
+            # 获取消息文本内容
+            text_content = event.message.message_str.strip()
             
-            # 2. 保存为WAV文件
-            wav_filename = f"voice_{hash(text_content)}.wav"
-            wav_file_path = self._save_as_wav(audio_waveform, wav_filename)
+            # 移除命令部分，只保留内容
+            if text_content.startswith('/speak'):
+                text_content = text_content[6:].strip()
+            elif text_content.startswith('speak'):
+                text_content = text_content[5:].strip()
             
-            logger.info(f"生成语音文件: {wav_file_path}")
+            if not text_content:
+                return self._create_plain_result("ldm让我说啥（）用法: /speak 要说的内容")
             
-            # 3. 发送语音消息
-            yield Record(str(wav_file_path))
+            # 调用语音合成
+            result = await self._synthesize_speech(text_content)
+            return result
             
         except Exception as error:
             logger.error(f"语音合成失败: {error}", exc_info=True)
-            yield Plain(f"草 合成崩了（）错误: {str(error)}")
+            return self._create_plain_result(f"草 合成崩了（）错误: {str(error)}")
+
+    async def llm_speak_tool(self, text: str):
+        """
+        LLM调用的语音合成工具
+        """
+        try:
+            if not text or not text.strip():
+                return {"success": False, "message": "文本内容不能为空"}
+            
+            result = await self._synthesize_speech(text)
+            
+            # 根据返回结果判断是否成功
+            if result and hasattr(result[0], 'type'):
+                if result[0].type == 'record':
+                    return {"success": True, "message": f"已成功合成语音: {text}"}
+                else:
+                    return {"success": False, "message": result[0].content}
+            else:
+                return {"success": False, "message": "语音合成失败"}
+                
+        except Exception as error:
+            logger.error(f"LLM语音合成失败: {error}", exc_info=True)
+            return {"success": False, "message": f"语音合成失败: {str(error)}"}
+
+    async def _synthesize_speech(self, text: str):
+        """通用的语音合成逻辑"""
+        # 1. 文本转音频
+        audio_waveform = self._text_to_audio(text)
+        if audio_waveform is None:
+            return self._create_plain_result("这些字我还不会说（）")
+        
+        # 2. 保存为WAV文件
+        wav_filename = f"voice_{hash(text)}_{id(text)}.wav"
+        wav_file_path = self._save_as_wav(audio_waveform, wav_filename)
+        
+        logger.info(f"生成语音文件: {wav_file_path}")
+        
+        # 3. 返回语音消息
+        return self._create_record_result(str(wav_file_path))
+
+    def _create_plain_result(self, text: str):
+        """创建文本结果"""
+        result = type('Result', (), {})()
+        result.type = 'plain'
+        result.content = text
+        return [result]
+
+    def _create_record_result(self, file_path: str):
+        """创建语音结果"""
+        result = type('Result', (), {})()
+        result.type = 'record'
+        result.content = file_path
+        return [result]
+
+    async def initialize(self):
+        """插件初始化完成后的回调"""
+        logger.info("语音合成插件初始化完成，LLM工具已注册")
