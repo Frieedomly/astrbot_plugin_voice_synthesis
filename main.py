@@ -6,10 +6,11 @@ from typing import Optional
 
 # 基础导入
 from astrbot.api import logger
-from astrbot.api.star import Star
+from astrbot.api.star import Context, Star, register
 from astrbot.api.event import AstrMessageEvent
 from astrbot.api.message_components import Plain, Record
 
+@register("voice_synthesis", "ldm", "一个简单的正弦波语音插件", "1.0.0", "repo url")
 
 class Main(Star):
     """
