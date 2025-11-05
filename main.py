@@ -1,28 +1,53 @@
-# main.py - AstrBot语音合成插件
+# main.py - 调试版本
 import numpy as np
 import wave
 from pathlib import Path
 from typing import Optional
 
-# 正确的导入方式 - 根据 star_manager.py 中的实际机制
-from astrbot.api import logger
-from astrbot.api_event import AstrMessageEvent
-from astrbot.api_message_components import Plain, Record
+# 调试：打印所有可用的模块
+import astrbot
+print("可用的 astrbot 子模块:", [name for name in dir(astrbot) if not name.startswith('_')])
 
-# 从 api_star 导入必要的类
 try:
-    from astrbot.api_star import Star, register, Context
-except ImportError:
-    # 如果 api_star 不可用，使用备用方案
-    class Star:
-        pass
-    class Context:
-        pass
-    def register(*args, **kwargs):
-        def decorator(cls):
-            return cls
-        return decorator
+    from astrbot.api_event import AstrMessageEvent
+    print("成功导入 AstrMessageEvent")
+except ImportError as e:
+    print(f"导入 AstrMessageEvent 失败: {e}")
 
+try:
+    from astrbot.api_star import Context, Star, register
+    print("成功导入 api_star")
+except ImportError as e:
+    print(f"导入 api_star 失败: {e}")
+
+try:
+    from astrbot.api import logger
+    print("成功导入 logger")
+except ImportError as e:
+    print(f"导入 logger 失败: {e}")
+
+try:
+    from astrbot.api_message_components import Plain, Record
+    print("成功导入 message_components")
+except ImportError as e:
+    print(f"导入 message_components 失败: {e}")
+
+# 创建备用类以防导入失败
+class AstrMessageEvent:
+    pass
+
+class Star:
+    pass
+
+class Context:
+    pass
+
+def register(*args, **kwargs):
+    def decorator(cls):
+        return cls
+    return decorator
+
+# 其余代码保持不变...
 
 @register("voice_synthesis", "截图人", "让截图人说话（纯机械合成音）", "1.0.0", "")
 class Main(Star):
