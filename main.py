@@ -4,8 +4,11 @@ import wave
 from pathlib import Path
 from typing import Optional
 
+
 # 只导入确认可用的API
 from astrbot.api import logger
+from astrbot.api.event import filter, AstrMessageEvent
+from astrbot.api.star import Context, Star, register
 
 class AstrMessageEvent:
     def __init__(self):
@@ -22,7 +25,10 @@ class AstrMessageEvent:
         result.type = 'record'
         result.content = file_path
         return result
-
+@register("voice_synthesis", "截图人", "让截图人说话（纯机械合成音）", "1.0.0", "")
+class VoiceSynthesisPlugin(Star):
+    def __init__(self, context: Context, config):
+        super().__init__(context)
 class Main:
     """
     主插件类
@@ -118,20 +124,22 @@ class Main:
         logger.info("截图人语音合成插件初始化完成")
 
     # 命令处理方法
-    async def speak_command(self, event, text: str):
+    @filter.command("speak")
+    async def speak_command(self, event: AstrMessageEvent, text: str):
         '''手动让截图人说话'''
         result = await self._synthesize_speech(text)
         if result.get("success"):
             yield event.record_result(result.get("file_path"))
         else:
             yield event.plain_result(f"语音合成失败（）错误: {result.get('error')}")
-
+            
     # LLM工具方法
-    async def speak_text_tool(self, event, text: str):
+    @filter.llm_tool(name="speak_text")
+    async def speak_text_tool(self, event: AstrMessageEvent, text: str):
         '''让截图人说出指定的文本内容
 
         Args:
-            text (string): 要说的文本内容
+            text(string): 要说的文本内容
         '''
         result = await self._synthesize_speech(text)
         if result.get("success"):
