@@ -4,7 +4,7 @@ from astrbot.api.event import filter, AstrMessageEvent, MessageEventResult
 from astrbot.api.message_components import Plain, Image, Record
 import json
 from pathlib import Path
-from loguru import logger
+
 import numpy as np
 import scipy.io.wavfile as wavfile
 import numpy as np
