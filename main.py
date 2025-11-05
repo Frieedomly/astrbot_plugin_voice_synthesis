@@ -1,10 +1,10 @@
-# main.py - AstrBot语音合成插件 v4
+# main.py - AstrBot语音合成插件
 import numpy as np
 import wave
 from pathlib import Path
 from typing import Optional
 
-# v4 API 导入（按照官方文档）
+# 基础导入
 from astrbot.api import logger
 from astrbot.api.star import Star
 from astrbot.api.event import AstrMessageEvent
@@ -14,13 +14,9 @@ from astrbot.api.message_components import Plain, Record
 class Main(Star):
     """
     主插件类
-    v4版本必须命名为 Main 并继承 Star
     """
     
     def __init__(self, context):
-        """
-        插件初始化
-        """
         super().__init__(context)
         
         # 音频采样率
