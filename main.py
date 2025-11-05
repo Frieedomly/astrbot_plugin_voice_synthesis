@@ -1,24 +1,49 @@
-# main.py - AstrBot语音合成插件
+# main.py - AstrBot语音合成插件 v4
 import numpy as np
 import wave
 from pathlib import Path
 from typing import Optional
 
-# 基础导入
-from astrbot.api import logger
-from astrbot.api.star import Context, Star, register
-from astrbot.api.event import AstrMessageEvent
-from astrbot.api.message_components import Plain, Record
+# v4 API 正确导入方式
+try:
+    # 方式1：标准v4导入
+    from astrbot.api import create_plugin
+    from astrbot.api import logger
+    from astrbot.api.event import AstrMessageEvent
+    from astrbot.api.message_components import Plain, Record
+    register = create_plugin
+except ImportError:
+    try:
+        # 方式2：备用导入
+        from astrbot.api import BotRegister
+        register = BotRegister
+        from astrbot.api import logger
+        from astrbot.api.event import AstrMessageEvent
+        from astrbot.api.message_components import Plain, Record
+    except ImportError:
+        # 方式3：调试导入
+        def register(*args, **kwargs):
+            def decorator(cls):
+                return cls
+            return decorator
+        logger = print
+        class AstrMessageEvent:
+            pass
+        class Plain:
+            pass
+        class Record:
+            pass
 
-@register("voice_synthesis", "ldm", "一个简单的正弦波语音插件", "1.0.0", "repo url")
-
-class Main(Star):
-    """
-    主插件类
-    """
+@register(
+    name="语音合成",
+    description="让截图人说话（纯机械合成音）",
+    version="1.0.0"
+)
+class VoiceSynthesisPlugin:
+    """语音合成插件主类"""
     
-    def __init__(self, context):
-        super().__init__(context)
+    def __init__(self, bot):
+        self.bot = bot
         
         # 音频采样率
         self.sample_rate = 22050
@@ -84,6 +109,10 @@ class Main(Star):
             '诶': ['e'],
             '呜': ['u'],
             '依': ['i'],
+            '哈': ['a'],
+            '嘿': ['e', 'i'],
+            '呼': ['u'],
+            '呵': ['o'],
         }
         
         # 插件数据目录
@@ -92,14 +121,8 @@ class Main(Star):
         
         logger.info("截图人语音合成插件初始化完成")
     
-    def _synthesize_vowel(
-        self, 
-        vowel: str, 
-        duration: Optional[float] = None
-    ) -> np.ndarray:
-        """
-        合成单个元音
-        """
+    def _synthesize_vowel(self, vowel: str, duration: Optional[float] = None) -> np.ndarray:
+        """合成单个元音"""
         if vowel not in self.vowels:
             logger.warning(f"未知元音: {vowel}")
             return np.array([])
@@ -109,20 +132,16 @@ class Main(Star):
             logger.warning(f"元音 '{vowel}' 未配置谐波数据")
             return np.array([])
         
-        # 确定持续时间
         dur = duration if duration is not None else config['duration']
-        
-        # 生成时间轴
         num_samples = int(self.sample_rate * dur)
         t = np.linspace(0, dur, num_samples)
         
-        # 叠加所有谐波分量
         signal = np.zeros_like(t)
         for frequency, amplitude in config['harmonics']:
             harmonic_wave = amplitude * np.sin(2 * np.pi * frequency * t)
             signal += harmonic_wave
         
-        # 应用包络（淡入淡出）
+        # 应用包络
         attack_len = min(int(0.02 * self.sample_rate), num_samples // 4)
         release_len = min(int(0.03 * self.sample_rate), num_samples // 4)
         
@@ -134,7 +153,7 @@ class Main(Star):
         
         signal *= envelope
         
-        # 归一化到[-0.8, 0.8]
+        # 归一化
         max_amplitude = np.max(np.abs(signal))
         if max_amplitude > 0:
             signal = signal / max_amplitude * 0.8
@@ -142,15 +161,11 @@ class Main(Star):
         return signal
     
     def _text_to_audio(self, text: str) -> Optional[np.ndarray]:
-        """
-        文本转音频波形
-        """
+        """文本转音频波形"""
         audio_segments = []
         
         for char in text:
-            # 查找字符对应的元音序列
             phoneme_list = self.char_to_vowels.get(char, ['a'])
-            
             for phoneme in phoneme_list:
                 segment = self._synthesize_vowel(phoneme)
                 if len(segment) > 0:
@@ -159,62 +174,44 @@ class Main(Star):
         if not audio_segments:
             return None
         
-        # 拼接所有片段
         return np.concatenate(audio_segments)
     
     def _save_as_wav(self, audio_data: np.ndarray, filename: str) -> Path:
-        """
-        保存为WAV文件
-        """
+        """保存为WAV文件"""
         file_path = self.data_dir / filename
-        
-        # 转换为16bit PCM整数格式
         audio_int16 = (audio_data * 32767).astype(np.int16)
         
-        # 写入WAV文件
         with wave.open(str(file_path), 'w') as wav_file:
-            wav_file.setnchannels(1)       # 单声道
-            wav_file.setsampwidth(2)       # 16bit = 2字节
+            wav_file.setnchannels(1)
+            wav_file.setsampwidth(2)
             wav_file.setframerate(self.sample_rate)
             wav_file.writeframes(audio_int16.tobytes())
         
         return file_path
-    
-    # v4版本使用 @Star.register 装饰器
-    @Star.register(
+
+    @register.command(
         name="speak",
-        description="让截图人说话（纯机械合成音）",
-        usage="/speak 要说的内容"
+        description="让截图人说话",
+        usage="/speak <文本>"
     )
-    async def speak_command(self, event: AstrMessageEvent):
-        """
-        /speak 指令处理器
-        
-        v4版本注意：参数只有 self 和 event
-        """
-        # 获取消息文本内容
-        text_content = event.message.message_str.strip()
-        
-        if not text_content:
-            yield event.plain_result("让我说啥（）")
+    async def speak_command(self, event: AstrMessageEvent, text: str):
+        """speak命令"""
+        if not text.strip():
+            yield Plain("ldm让我说啥（）")
             return
         
         try:
-            # 1. 文本转音频
-            audio_waveform = self._text_to_audio(text_content)
+            audio_waveform = self._text_to_audio(text)
             if audio_waveform is None:
-                yield event.plain_result("这些字我还不会说（）")
+                yield Plain("这些字我还不会说（）")
                 return
             
-            # 2. 保存为WAV文件
-            wav_filename = f"voice_{hash(text_content)}.wav"
+            wav_filename = f"voice_{hash(text)}.wav"
             wav_file_path = self._save_as_wav(audio_waveform, wav_filename)
             
             logger.info(f"生成语音文件: {wav_file_path}")
-            
-            # 3. 发送语音消息
-            yield event.record_result(str(wav_file_path))
+            yield Record(str(wav_file_path))
             
         except Exception as error:
             logger.error(f"语音合成失败: {error}", exc_info=True)
-            yield event.plain_result(f"草 合成崩了（）错误: {str(error)}")
+            yield Plain(f"草 合成崩了（）错误: {str(error)}")
