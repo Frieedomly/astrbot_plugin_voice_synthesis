@@ -6,8 +6,6 @@ from typing import Optional, List, Tuple
 
 from astrbot.api.star import Star, register
 from astrbot.api.event import AstrMessageEvent
-from astrbot.api import message
-MessageChain = message.MessageChain
 from astrbot.api.message_components import Plain, Record
 from astrbot.api import logger, CommandResult
 
