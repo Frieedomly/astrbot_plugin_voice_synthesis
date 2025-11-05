@@ -4,10 +4,10 @@ import wave
 from pathlib import Path
 from typing import Optional
 
-# 使用实际可用的导入
-from astrbot.api import logger, command, llm_tool, register_plugin
+# 导入AstrBot API
+from astrbot.api import logger
+from astrbot.api.plugin import Plugin, PluginMeta
 
-# 创建必要的类和装饰器
 class AstrMessageEvent:
     def __init__(self):
         self.message = type('Message', (), {'message_str': ''})()
@@ -24,44 +24,19 @@ class AstrMessageEvent:
         result.content = file_path
         return result
 
-class Filter:
-    def command(self, name):
-        def decorator(func):
-            func.is_command = True
-            func.command_name = name
-            return func
-        return decorator
-    
-    def llm_tool(self, name):
-        def decorator(func):
-            func.is_llm_tool = True
-            func.tool_name = name
-            return func
-        return decorator
-
-filter = Filter()
-
-# 简单的注册装饰器
-def register(name, author, description, version, other):
-    def decorator(cls):
-        cls.plugin_info = {
-            'name': name,
-            'author': author,
-            'description': description,
-            'version': version
-        }
-        return cls
-    return decorator
-
-@register("voice_synthesis", "截图人", "让截图人说话（纯机械合成音）", "1.0.0", "")
-class Main:
+# 使用Plugin基类和PluginMeta元类
+class Main(Plugin, metaclass=PluginMeta):
     """
     主插件类
     """
+    # 插件元数据
+    name = "voice_synthesis"
+    author = "截图人"
+    description = "让截图人说话（纯机械合成音）"
+    version = "1.0.0"
     
     def __init__(self, context, config=None):
-        self.context = context
-        self.config = config
+        super().__init__(context, config)
         
         # 音频采样率
         self.sample_rate = 22050
@@ -143,50 +118,17 @@ class Main:
         
         logger.info("截图人语音合成插件初始化完成")
 
-    def get_command_map(self):
-        """返回命令映射"""
-        command_map = {}
-        
-        # 检查所有方法，找到标记为命令的方法
-        for attr_name in dir(self):
-            attr = getattr(self, attr_name)
-            if hasattr(attr, 'is_command') and attr.is_command:
-                command_map[attr.command_name] = {
-                    "func": attr,
-                    "description": getattr(attr, '__doc__', '无描述').strip(),
-                    "usage": f"/{attr.command_name} <文本>"
-                }
-        
-        return command_map
+    # 根据文档，定义命令处理方法
+    async def cmd_speak(self, event: AstrMessageEvent, text: str):
+        '''手动让截图人说话'''
+        result = await self._synthesize_speech(text)
+        if result.get("success"):
+            yield event.record_result(result.get("file_path"))
+        else:
+            yield event.plain_result(f"语音合成失败（）错误: {result.get('error')}")
 
-    def get_llm_tools(self):
-        """返回LLM工具列表"""
-        llm_tools = []
-        
-        # 检查所有方法，找到标记为LLM工具的方法
-        for attr_name in dir(self):
-            attr = getattr(self, attr_name)
-            if hasattr(attr, 'is_llm_tool') and attr.is_llm_tool:
-                llm_tools.append({
-                    "name": attr.tool_name,
-                    "description": getattr(attr, '__doc__', '无描述').strip(),
-                    "function": attr,
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "text": {
-                                "type": "string",
-                                "description": "要说的文本内容"
-                            }
-                        },
-                        "required": ["text"]
-                    }
-                })
-        
-        return llm_tools
-
-    @llm_tool("speak_text")
-    async def speak_text_tool(self, event, text: str):
+    # 根据文档，定义LLM工具方法
+    async def tool_speak_text(self, event: AstrMessageEvent, text: str):
         '''让截图人说出指定的文本内容
 
         Args:
@@ -195,15 +137,6 @@ class Main:
         result = await self._synthesize_speech(text)
         if result.get("success"):
             yield event.plain_result(f"已成功合成语音: {text}")
-        else:
-            yield event.plain_result(f"语音合成失败（）错误: {result.get('error')}")
-
-    @command("speak")
-    async def speak_command(self, event, text: str):
-        '''手动让截图人说话'''
-        result = await self._synthesize_speech(text)
-        if result.get("success"):
-            yield event.record_result(result.get("file_path"))
         else:
             yield event.plain_result(f"语音合成失败（）错误: {result.get('error')}")
 
@@ -298,22 +231,37 @@ class Main:
             logger.error(f"语音合成失败: {error}", exc_info=True)
             return {"success": False, "error": f"草 语音崩了: {str(error)}"}
 
-    async def initialize(self):
-        """插件初始化"""# 注册命令到AstrBot系统
-        for command_name, command_info in self.get_command_map().items():
-            self.context.register_command(
-            command_name,
-            command_info["func"],
-            description=command_info["description"],
-            usage=command_info["usage"]
-        )
+    # 根据文档，实现命令注册方法
+    def get_commands(self):
+        """返回命令列表"""
+        return {
+            "speak": {
+                "func": self.cmd_speak,
+                "description": "手动让截图人说话",
+                "usage": "/speak <文本>"
+            }
+        }
     
-    # 注册LLM工具到AstrBot系统
-        for tool in self.get_llm_tools():
-            self.context.register_llm_tool(
-            tool["name"],
-            tool["function"],
-            description=tool["description"],
-            parameters=tool["parameters"]
-        )
+    # 根据文档，实现LLM工具注册方法
+    def get_llm_tools(self):
+        """返回LLM工具列表"""
+        return {
+            "speak_text": {
+                "func": self.tool_speak_text,
+                "description": "让截图人说出指定的文本内容",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "text": {
+                            "type": "string",
+                            "description": "要说的文本内容"
+                        }
+                    },
+                    "required": ["text"]
+                }
+            }
+        }
+
+    async def initialize(self):
+        """插件初始化"""
         logger.info("语音合成插件初始化完成")
