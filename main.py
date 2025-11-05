@@ -4,9 +4,8 @@ import wave
 from pathlib import Path
 from typing import Optional
 
-# 导入AstrBot API
+# 只导入确认可用的API
 from astrbot.api import logger
-from astrbot.api.plugin import Plugin, PluginMeta
 
 class AstrMessageEvent:
     def __init__(self):
@@ -24,8 +23,7 @@ class AstrMessageEvent:
         result.content = file_path
         return result
 
-# 使用Plugin基类和PluginMeta元类
-class Main(Plugin, metaclass=PluginMeta):
+class Main:
     """
     主插件类
     """
@@ -36,7 +34,8 @@ class Main(Plugin, metaclass=PluginMeta):
     version = "1.0.0"
     
     def __init__(self, context, config=None):
-        super().__init__(context, config)
+        self.context = context
+        self.config = config
         
         # 音频采样率
         self.sample_rate = 22050
@@ -118,8 +117,8 @@ class Main(Plugin, metaclass=PluginMeta):
         
         logger.info("截图人语音合成插件初始化完成")
 
-    # 根据文档，定义命令处理方法
-    async def cmd_speak(self, event: AstrMessageEvent, text: str):
+    # 命令处理方法
+    async def speak_command(self, event, text: str):
         '''手动让截图人说话'''
         result = await self._synthesize_speech(text)
         if result.get("success"):
@@ -127,8 +126,8 @@ class Main(Plugin, metaclass=PluginMeta):
         else:
             yield event.plain_result(f"语音合成失败（）错误: {result.get('error')}")
 
-    # 根据文档，定义LLM工具方法
-    async def tool_speak_text(self, event: AstrMessageEvent, text: str):
+    # LLM工具方法
+    async def speak_text_tool(self, event, text: str):
         '''让截图人说出指定的文本内容
 
         Args:
@@ -231,23 +230,23 @@ class Main(Plugin, metaclass=PluginMeta):
             logger.error(f"语音合成失败: {error}", exc_info=True)
             return {"success": False, "error": f"草 语音崩了: {str(error)}"}
 
-    # 根据文档，实现命令注册方法
+    # 命令注册方法
     def get_commands(self):
         """返回命令列表"""
         return {
             "speak": {
-                "func": self.cmd_speak,
+                "func": self.speak_command,
                 "description": "手动让截图人说话",
                 "usage": "/speak <文本>"
             }
         }
     
-    # 根据文档，实现LLM工具注册方法
+    # LLM工具注册方法
     def get_llm_tools(self):
         """返回LLM工具列表"""
         return {
             "speak_text": {
-                "func": self.tool_speak_text,
+                "func": self.speak_text_tool,
                 "description": "让截图人说出指定的文本内容",
                 "parameters": {
                     "type": "object",
@@ -264,4 +263,15 @@ class Main(Plugin, metaclass=PluginMeta):
 
     async def initialize(self):
         """插件初始化"""
-        logger.info("语音合成插件初始化完成")
+        try:
+            logger.info("语音合成插件初始化完成")
+            # 打印调试信息
+            logger.info(f"已注册命令: {list(self.get_commands().keys())}")
+            logger.info(f"已注册LLM工具: {list(self.get_llm_tools().keys())}")
+            
+            # 打印上下文对象的方法，帮助调试
+            context_methods = [m for m in dir(self.context) if not m.startswith('_')]
+            logger.info(f"上下文对象方法: {context_methods}")
+        except Exception as e:
+            logger.error(f"插件初始化失败: {e}", exc_info=True)
+
