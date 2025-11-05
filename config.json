@@ -1,0 +1,14 @@
+{
+  "voice_synthesis": {
+    "llm_provider": "openai",
+    "model": "gpt-4o-mini",
+    "api_key": "sk-DkjETBdJRYdNBXCzTNLyzp0CERDB2iTxe8b1qMrVcSuYkbP8",
+    "base_url": "https://api.master-jsx.top",
+    "temperature": 0.3
+  },
+  "output": {
+    "sample_rate": 16000,
+    "amplitude": 0.3,
+    "save_dir": "data/voice_synthesis"
+  }
+}
